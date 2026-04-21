@@ -437,6 +437,39 @@
 </div>
 
 <script>
+// ── Storage shim: works on Netlify (localStorage) and inside Claude artifacts (window.storage) ──
+const store = {
+  async get(key) {
+    if (window.storage) {
+      try { return await window.storage.get(key); } catch(e) { return null; }
+    }
+    try {
+      const v = localStorage.getItem(key);
+      return v ? { value: v } : null;
+    } catch(e) { return null; }
+  },
+  async set(key, value) {
+    if (window.storage) {
+      try { return await window.storage.set(key, value); } catch(e) { return null; }
+    }
+    try { localStorage.setItem(key, value); return { value }; } catch(e) { return null; }
+  },
+  async delete(key) {
+    if (window.storage) {
+      try { return await window.storage.delete(key); } catch(e) { return null; }
+    }
+    try { localStorage.removeItem(key); return { deleted: true }; } catch(e) { return null; }
+  },
+  async list(prefix) {
+    if (window.storage) {
+      try { return await window.storage.list(prefix); } catch(e) { return { keys: [] }; }
+    }
+    try {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+      return { keys };
+    } catch(e) { return { keys: [] }; }
+  }
+};
 const DEFAULT_LINE = 8.5;
 const SEASON_START = '2026-03-25';
 let API_GAMES = [];
@@ -582,8 +615,8 @@ async function loadOrFetchGames() {
   // Check cache first
   try {
     const [cg, cs] = await Promise.all([
-      window.storage.get(cacheKey),
-      window.storage.get(standingsKey)
+      store.get(cacheKey),
+      store.get(standingsKey)
     ]);
     if (cg && cs) {
       API_GAMES = JSON.parse(cg.value);
@@ -602,11 +635,11 @@ async function loadOrFetchGames() {
     ]);
     if (games.length > 0) {
       API_GAMES = games;
-      await window.storage.set(cacheKey, JSON.stringify(API_GAMES));
+      await store.set(cacheKey, JSON.stringify(API_GAMES));
     }
     if (standings.length > 0) {
       STANDINGS = standings;
-      await window.storage.set(standingsKey, JSON.stringify(STANDINGS));
+      await store.set(standingsKey, JSON.stringify(STANDINGS));
     }
     setStatus('ok', `✓ ${API_GAMES.length} games · ${STANDINGS.length} teams · live from MLB`);
   } catch(e) {
@@ -614,10 +647,10 @@ async function loadOrFetchGames() {
     setStatus('error', `MLB API unavailable — ${e.message}`);
     // Try to use any previously cached data (even yesterday's)
     try {
-      const keys = await window.storage.list('mlb-games-v2-');
+      const keys = await store.list('mlb-games-v2-');
       if (keys && keys.keys && keys.keys.length > 0) {
         const latest = keys.keys.sort().reverse()[0];
-        const cached = await window.storage.get(latest);
+        const cached = await store.get(latest);
         if (cached) {
           API_GAMES = JSON.parse(cached.value);
           setStatus('error', `MLB API error — showing last cached data (${latest.replace('mlb-games-v2-','')})`);
@@ -650,8 +683,8 @@ function buildStandingsFromGames() {
 async function refreshData() {
   const today = todayStr();
   try {
-    await window.storage.delete('mlb-games-v2-' + today);
-    await window.storage.delete('mlb-standings-v2-' + today);
+    await store.delete('mlb-games-v2-' + today);
+    await store.delete('mlb-standings-v2-' + today);
   } catch(e) {}
   await loadOrFetchGames();
   TEAM_STATS = buildTeamStats();
@@ -1096,7 +1129,7 @@ let pendingPrediction = null;
 
 async function loadSavedLines() {
   try {
-    const result = await window.storage.get('mlb-lines-2026');
+    const result = await store.get('mlb-lines-2026');
     return result ? JSON.parse(result.value) : [];
   } catch (e) {
     return [];
@@ -1107,7 +1140,7 @@ async function saveLine(entry) {
   try {
     const lines = await loadSavedLines();
     lines.unshift(entry); // newest first
-    await window.storage.set('mlb-lines-2026', JSON.stringify(lines));
+    await store.set('mlb-lines-2026', JSON.stringify(lines));
     return lines;
   } catch (e) {
     console.error('Storage error', e);
@@ -1118,7 +1151,7 @@ async function saveLine(entry) {
 async function clearAllLines() {
   if (!confirm('Clear all saved lines? This cannot be undone.')) return;
   try {
-    await window.storage.delete('mlb-lines-2026');
+    await store.delete('mlb-lines-2026');
     renderLinesHistory();
     updateLinesBadge(0);
     document.getElementById('log-feedback').textContent = '';
