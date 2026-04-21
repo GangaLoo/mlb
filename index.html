@@ -437,235 +437,221 @@
 </div>
 
 <script>
-// ========================
-// TEAM REGISTRY — all 30 MLB teams
-// ========================
-const TEAM_REGISTRY = [
-  {abbr:'BAL',name:'Baltimore Orioles',conf:'AL'},
-  {abbr:'NYY',name:'New York Yankees',conf:'AL'},
-  {abbr:'TB',name:'Tampa Bay Rays',conf:'AL'},
-  {abbr:'BOS',name:'Boston Red Sox',conf:'AL'},
-  {abbr:'TOR',name:'Toronto Blue Jays',conf:'AL'},
-  {abbr:'CLE',name:'Cleveland Guardians',conf:'AL'},
-  {abbr:'MIN',name:'Minnesota Twins',conf:'AL'},
-  {abbr:'DET',name:'Detroit Tigers',conf:'AL'},
-  {abbr:'KC',name:'Kansas City Royals',conf:'AL'},
-  {abbr:'CWS',name:'Chicago White Sox',conf:'AL'},
-  {abbr:'ATH',name:'Athletics',conf:'AL'},
-  {abbr:'TEX',name:'Texas Rangers',conf:'AL'},
-  {abbr:'LAA',name:'Los Angeles Angels',conf:'AL'},
-  {abbr:'SEA',name:'Seattle Mariners',conf:'AL'},
-  {abbr:'HOU',name:'Houston Astros',conf:'AL'},
-  {abbr:'PIT',name:'Pittsburgh Pirates',conf:'NL'},
-  {abbr:'CIN',name:'Cincinnati Reds',conf:'NL'},
-  {abbr:'MIL',name:'Milwaukee Brewers',conf:'NL'},
-  {abbr:'STL',name:'St. Louis Cardinals',conf:'NL'},
-  {abbr:'CHC',name:'Chicago Cubs',conf:'NL'},
-  {abbr:'ATL',name:'Atlanta Braves',conf:'NL'},
-  {abbr:'MIA',name:'Miami Marlins',conf:'NL'},
-  {abbr:'PHI',name:'Philadelphia Phillies',conf:'NL'},
-  {abbr:'WSH',name:'Washington Nationals',conf:'NL'},
-  {abbr:'NYM',name:'New York Mets',conf:'NL'},
-  {abbr:'LAD',name:'Los Angeles Dodgers',conf:'NL'},
-  {abbr:'SD',name:'San Diego Padres',conf:'NL'},
-  {abbr:'AZ',name:'Arizona Diamondbacks',conf:'NL'},
-  {abbr:'COL',name:'Colorado Rockies',conf:'NL'},
-  {abbr:'SF',name:'San Francisco Giants',conf:'NL'},
-];
-
 const DEFAULT_LINE = 8.5;
+const SEASON_START = '2026-03-25';
 let API_GAMES = [];
 let STANDINGS = [];
 let TEAM_STATS = {};
 
-// ========================
-// LIVE DATA FETCH — Anthropic API with web search
-// Caches result in storage for the day, refreshes next day
-// ========================
-async function loadOrFetchGames() {
-  const todayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const cacheKey = 'mlb-games-cache-' + todayKey;
-  const standingsKey = 'mlb-standings-cache-' + todayKey;
+// ── MLB team ID → abbreviation map (official IDs from statsapi.mlb.com) ──────
+const MLB_ID_TO_ABBR = {
+  133:'ATH', 134:'PIT', 135:'SD', 136:'SEA', 137:'SF',
+  138:'STL', 139:'TB',  140:'TEX', 141:'TOR', 142:'MIN',
+  143:'PHI', 144:'ATL', 145:'CWS', 146:'MIA', 147:'NYY',
+  158:'MIL', 108:'LAA', 109:'AZ',  110:'BAL', 111:'BOS',
+  112:'CHC', 113:'CIN', 114:'CLE', 115:'COL', 116:'DET',
+  117:'HOU', 118:'KC',  119:'LAD', 120:'WSH', 121:'NYM'
+};
 
-  setStatus('loading', 'Checking for today\'s data…');
+// ── Conf lookup ───────────────────────────────────────────────────────────────
+const TEAM_CONF = {
+  BAL:'AL',NYY:'AL',TB:'AL',BOS:'AL',TOR:'AL',
+  CLE:'AL',MIN:'AL',DET:'AL',KC:'AL',CWS:'AL',
+  ATH:'AL',TEX:'AL',LAA:'AL',SEA:'AL',HOU:'AL',
+  PIT:'NL',CIN:'NL',MIL:'NL',STL:'NL',CHC:'NL',
+  ATL:'NL',MIA:'NL',PHI:'NL',WSH:'NL',NYM:'NL',
+  LAD:'NL',SD:'NL',AZ:'NL',COL:'NL',SF:'NL'
+};
+const TEAM_NAMES = {
+  BAL:'Baltimore Orioles',NYY:'New York Yankees',TB:'Tampa Bay Rays',
+  BOS:'Boston Red Sox',TOR:'Toronto Blue Jays',CLE:'Cleveland Guardians',
+  MIN:'Minnesota Twins',DET:'Detroit Tigers',KC:'Kansas City Royals',
+  CWS:'Chicago White Sox',ATH:'Athletics',TEX:'Texas Rangers',
+  LAA:'Los Angeles Angels',SEA:'Seattle Mariners',HOU:'Houston Astros',
+  PIT:'Pittsburgh Pirates',CIN:'Cincinnati Reds',MIL:'Milwaukee Brewers',
+  STL:'St. Louis Cardinals',CHC:'Chicago Cubs',ATL:'Atlanta Braves',
+  MIA:'Miami Marlins',PHI:'Philadelphia Phillies',WSH:'Washington Nationals',
+  NYM:'New York Mets',LAD:'Los Angeles Dodgers',SD:'San Diego Padres',
+  AZ:'Arizona Diamondbacks',COL:'Colorado Rockies',SF:'San Francisco Giants'
+};
 
-  // Try cache first
-  try {
-    const [cachedGames, cachedStandings] = await Promise.all([
-      window.storage.get(cacheKey),
-      window.storage.get(standingsKey)
-    ]);
-    if (cachedGames && cachedStandings) {
-      API_GAMES = JSON.parse(cachedGames.value);
-      STANDINGS = JSON.parse(cachedStandings.value);
-      setStatus('ok', `Data loaded (cached ${todayKey}) — ${API_GAMES.length} games`);
-      return true;
-    }
-  } catch(e) {}
-
-  // Fetch fresh via Anthropic API + web search
-  setStatus('loading', 'Fetching live MLB scores and standings…');
-  try {
-    const gamesData = await fetchGamesFromClaude();
-    const standingsData = await fetchStandingsFromClaude();
-    if (gamesData && gamesData.length > 0) {
-      API_GAMES = gamesData;
-      await window.storage.set(cacheKey, JSON.stringify(API_GAMES));
-    }
-    if (standingsData && standingsData.length > 0) {
-      STANDINGS = standingsData;
-      await window.storage.set(standingsKey, JSON.stringify(STANDINGS));
-    }
-    setStatus('ok', `Live data fetched — ${API_GAMES.length} games · ${new Date().toLocaleTimeString()}`);
-    return true;
-  } catch(e) {
-    setStatus('error', 'Could not fetch live data — using fallback');
-    useFallbackData();
-    return false;
-  }
-}
-
-async function fetchGamesFromClaude() {
-  const today = new Date().toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
-  const prompt = `Search for all completed MLB games from March 25, 2026 through today (${today}).
-Return ONLY a JSON array, no other text, no markdown, no backticks.
-Each element must have exactly these fields:
-{ "date": "Apr 14", "home": "LAD", "away": "NYM", "homeScore": 5, "awayScore": 3 }
-
-Use these exact team abbreviations: BAL NYY TB BOS TOR CLE MIN DET KC CWS ATH TEX LAA SEA HOU PIT CIN MIL STL CHC ATL MIA PHI WSH NYM LAD SD AZ COL SF
-
-Only include completed (final score) games. Do not include scheduled or in-progress games.`;
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-  const data = await response.json();
-  const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
-  // Strip any accidental markdown fences
-  const clean = text.replace(/```json|```/gi, '').trim();
-  // Extract JSON array
-  const match = clean.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error('No JSON array in response');
-  return JSON.parse(match[0]);
-}
-
-async function fetchStandingsFromClaude() {
-  const today = new Date().toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
-  const prompt = `Search for current 2026 MLB standings as of ${today}.
-Return ONLY a JSON array, no other text, no markdown, no backticks.
-Each element must have exactly these fields:
-{ "abbr": "LAD", "name": "Los Angeles Dodgers", "wins": 11, "losses": 4, "conf": "NL" }
-
-Use these exact abbreviations: BAL NYY TB BOS TOR CLE MIN DET KC CWS ATH TEX LAA SEA HOU PIT CIN MIL STL CHC ATL MIA PHI WSH NYM LAD SD AZ COL SF
-Include all 30 teams.`;
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 3000,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-  const data = await response.json();
-  const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
-  const clean = text.replace(/```json|```/gi, '').trim();
-  const match = clean.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error('No JSON array in response');
-  return JSON.parse(match[0]);
-}
-
-function useFallbackData() {
-  // Hardcoded Apr 11-12 games as fallback
-  API_GAMES = [
-    {date:'Apr 11',home:'PHI',away:'AZ',homeScore:4,awayScore:3},
-    {date:'Apr 11',home:'DET',away:'MIA',homeScore:6,awayScore:1},
-    {date:'Apr 11',home:'CHC',away:'PIT',homeScore:3,awayScore:4},
-    {date:'Apr 11',home:'TOR',away:'MIN',homeScore:4,awayScore:7},
-    {date:'Apr 11',home:'KC',away:'CWS',homeScore:2,awayScore:0},
-    {date:'Apr 11',home:'CIN',away:'LAA',homeScore:7,awayScore:3},
-    {date:'Apr 11',home:'NYM',away:'ATH',homeScore:6,awayScore:11},
-    {date:'Apr 11',home:'TB',away:'NYY',homeScore:5,awayScore:4},
-    {date:'Apr 11',home:'MIL',away:'WSH',homeScore:1,awayScore:3},
-    {date:'Apr 11',home:'BAL',away:'SF',homeScore:6,awayScore:2},
-    {date:'Apr 11',home:'STL',away:'BOS',homeScore:1,awayScore:7},
-    {date:'Apr 11',home:'ATL',away:'CLE',homeScore:0,awayScore:6},
-    {date:'Apr 11',home:'SD',away:'COL',homeScore:9,awayScore:5},
-    {date:'Apr 11',home:'LAD',away:'TEX',homeScore:6,awayScore:3},
-    {date:'Apr 11',home:'SEA',away:'HOU',homeScore:8,awayScore:7},
-    {date:'Apr 12',home:'BAL',away:'SF',homeScore:6,awayScore:2},
-    {date:'Apr 12',home:'PHI',away:'AZ',homeScore:3,awayScore:4},
-    {date:'Apr 12',home:'TOR',away:'MIN',homeScore:2,awayScore:8},
-    {date:'Apr 12',home:'CIN',away:'LAA',homeScore:6,awayScore:9},
-    {date:'Apr 12',home:'DET',away:'MIA',homeScore:8,awayScore:2},
-    {date:'Apr 12',home:'TB',away:'NYY',homeScore:5,awayScore:4},
-    {date:'Apr 12',home:'NYM',away:'ATH',homeScore:0,awayScore:1},
-    {date:'Apr 12',home:'KC',away:'CWS',homeScore:5,awayScore:6},
-    {date:'Apr 12',home:'MIL',away:'WSH',homeScore:6,awayScore:8},
-    {date:'Apr 12',home:'STL',away:'BOS',homeScore:3,awayScore:9},
-    {date:'Apr 12',home:'CHC',away:'PIT',homeScore:7,awayScore:6},
-    {date:'Apr 12',home:'SEA',away:'HOU',homeScore:6,awayScore:1},
-    {date:'Apr 12',home:'LAD',away:'TEX',homeScore:2,awayScore:5},
-    {date:'Apr 12',home:'SD',away:'COL',homeScore:7,awayScore:2},
-    {date:'Apr 12',home:'ATL',away:'CLE',homeScore:13,awayScore:1},
-  ];
-  STANDINGS = [
-    {abbr:'BAL',name:'Baltimore Orioles',wins:8,losses:7,conf:'AL'},
-    {abbr:'NYY',name:'New York Yankees',wins:8,losses:7,conf:'AL'},
-    {abbr:'TB',name:'Tampa Bay Rays',wins:8,losses:7,conf:'AL'},
-    {abbr:'BOS',name:'Boston Red Sox',wins:6,losses:9,conf:'AL'},
-    {abbr:'TOR',name:'Toronto Blue Jays',wins:6,losses:9,conf:'AL'},
-    {abbr:'CLE',name:'Cleveland Guardians',wins:9,losses:7,conf:'AL'},
-    {abbr:'MIN',name:'Minnesota Twins',wins:9,losses:7,conf:'AL'},
-    {abbr:'DET',name:'Detroit Tigers',wins:7,losses:9,conf:'AL'},
-    {abbr:'KC',name:'Kansas City Royals',wins:7,losses:9,conf:'AL'},
-    {abbr:'CWS',name:'Chicago White Sox',wins:6,losses:10,conf:'AL'},
-    {abbr:'ATH',name:'Athletics',wins:8,losses:7,conf:'AL'},
-    {abbr:'TEX',name:'Texas Rangers',wins:8,losses:7,conf:'AL'},
-    {abbr:'LAA',name:'Los Angeles Angels',wins:8,losses:8,conf:'AL'},
-    {abbr:'SEA',name:'Seattle Mariners',wins:7,losses:9,conf:'AL'},
-    {abbr:'HOU',name:'Houston Astros',wins:6,losses:10,conf:'AL'},
-    {abbr:'PIT',name:'Pittsburgh Pirates',wins:9,losses:6,conf:'NL'},
-    {abbr:'CIN',name:'Cincinnati Reds',wins:9,losses:7,conf:'NL'},
-    {abbr:'MIL',name:'Milwaukee Brewers',wins:8,losses:7,conf:'NL'},
-    {abbr:'STL',name:'St. Louis Cardinals',wins:8,losses:7,conf:'NL'},
-    {abbr:'CHC',name:'Chicago Cubs',wins:7,losses:8,conf:'NL'},
-    {abbr:'ATL',name:'Atlanta Braves',wins:10,losses:6,conf:'NL'},
-    {abbr:'MIA',name:'Miami Marlins',wins:8,losses:8,conf:'NL'},
-    {abbr:'PHI',name:'Philadelphia Phillies',wins:7,losses:8,conf:'NL'},
-    {abbr:'WSH',name:'Washington Nationals',wins:7,losses:8,conf:'NL'},
-    {abbr:'NYM',name:'New York Mets',wins:7,losses:9,conf:'NL'},
-    {abbr:'LAD',name:'Los Angeles Dodgers',wins:11,losses:4,conf:'NL'},
-    {abbr:'SD',name:'San Diego Padres',wins:10,losses:6,conf:'NL'},
-    {abbr:'AZ',name:'Arizona Diamondbacks',wins:9,losses:7,conf:'NL'},
-    {abbr:'COL',name:'Colorado Rockies',wins:6,losses:10,conf:'NL'},
-    {abbr:'SF',name:'San Francisco Giants',wins:6,losses:10,conf:'NL'},
-  ];
-}
-
+// ── Status helper ─────────────────────────────────────────────────────────────
 function setStatus(type, msg) {
   const el = document.getElementById('fetch-status');
   if (!el) return;
-  const colors = { loading: 'var(--accent)', ok: 'var(--green)', error: 'var(--red)' };
+  const colors = { loading:'var(--accent)', ok:'var(--green)', error:'var(--red)' };
   el.style.color = colors[type] || 'var(--muted)';
   el.textContent = msg;
 }
 
-async function refreshData() {
-  // Force re-fetch by deleting today's cache
-  const todayKey = new Date().toISOString().slice(0, 10);
+// ── Date helpers ──────────────────────────────────────────────────────────────
+function todayStr() { return new Date().toISOString().slice(0,10); }
+
+// Split season start→today into 30-day chunks (API limit)
+function dateChunks(startISO, endISO) {
+  const chunks = [];
+  let cur = new Date(startISO);
+  const end = new Date(endISO);
+  while (cur <= end) {
+    const chunkEnd = new Date(cur);
+    chunkEnd.setDate(chunkEnd.getDate() + 29);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+    chunks.push([cur.toISOString().slice(0,10), chunkEnd.toISOString().slice(0,10)]);
+    cur = new Date(chunkEnd);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return chunks;
+}
+
+// ── Fetch all regular-season games from MLB Stats API ─────────────────────────
+// statsapi.mlb.com is free, no API key, open CORS — used by MLB.com itself
+async function fetchMLBGames() {
+  const today = todayStr();
+  const chunks = dateChunks(SEASON_START, today);
+  const allGames = [];
+
+  for (const [start, end] of chunks) {
+    const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${start}&endDate=${end}&gameType=R&hydrate=linescore&fields=dates,date,games,gamePk,status,abstractGameState,teams,home,away,team,id,abbreviation,score`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`MLB API error ${res.status}`);
+    const data = await res.json();
+
+    for (const dateObj of (data.dates || [])) {
+      const label = new Date(dateObj.date + 'T12:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
+      for (const game of (dateObj.games || [])) {
+        // Only include Final games
+        if (game.status?.abstractGameState !== 'Final') continue;
+        const homeId = game.teams?.home?.team?.id;
+        const awayId = game.teams?.away?.team?.id;
+        const homeScore = game.teams?.home?.score;
+        const awayScore = game.teams?.away?.score;
+        // Use abbreviation from response, fallback to our ID map
+        const homeAbbr = game.teams?.home?.team?.abbreviation || MLB_ID_TO_ABBR[homeId];
+        const awayAbbr = game.teams?.away?.team?.abbreviation || MLB_ID_TO_ABBR[awayId];
+        if (!homeAbbr || !awayAbbr || homeScore == null || awayScore == null) continue;
+        // Normalize a few abbreviations MLB uses differently
+        const norm = a => a === 'OAK' ? 'ATH' : a === 'WAS' ? 'WSH' : a === 'CWS' ? 'CWS' : a;
+        allGames.push({
+          date: label,
+          home: norm(homeAbbr),
+          away: norm(awayAbbr),
+          homeScore: Number(homeScore),
+          awayScore: Number(awayScore)
+        });
+      }
+    }
+  }
+  return allGames;
+}
+
+// ── Fetch standings from MLB Stats API ────────────────────────────────────────
+async function fetchMLBStandings() {
+  // leagueId 103=AL, 104=NL
+  const url = `https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&season=2026&standingsTypes=regularSeason&fields=records,teamRecords,team,id,abbreviation,wins,losses`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Standings API error ${res.status}`);
+  const data = await res.json();
+  const standings = [];
+  for (const division of (data.records || [])) {
+    for (const rec of (division.teamRecords || [])) {
+      const id = rec.team?.id;
+      const rawAbbr = rec.team?.abbreviation || '';
+      const norm = a => a === 'OAK' ? 'ATH' : a === 'WAS' ? 'WSH' : a;
+      const abbr = norm(rawAbbr) || MLB_ID_TO_ABBR[id];
+      if (!abbr) continue;
+      standings.push({
+        abbr,
+        name: TEAM_NAMES[abbr] || rec.team?.name || abbr,
+        wins: rec.wins || 0,
+        losses: rec.losses || 0,
+        conf: TEAM_CONF[abbr] || 'AL'
+      });
+    }
+  }
+  return standings;
+}
+
+// ── Main loader: cache today's data in storage, re-fetch tomorrow ─────────────
+async function loadOrFetchGames() {
+  const today = todayStr();
+  const cacheKey = 'mlb-games-v2-' + today;
+  const standingsKey = 'mlb-standings-v2-' + today;
+
+  setStatus('loading', 'Loading MLB data…');
+
+  // Check cache first
   try {
-    await window.storage.delete('mlb-games-cache-' + todayKey);
-    await window.storage.delete('mlb-standings-cache-' + todayKey);
+    const [cg, cs] = await Promise.all([
+      window.storage.get(cacheKey),
+      window.storage.get(standingsKey)
+    ]);
+    if (cg && cs) {
+      API_GAMES = JSON.parse(cg.value);
+      STANDINGS = JSON.parse(cs.value);
+      setStatus('ok', `✓ ${API_GAMES.length} games loaded (cached · ${today})`);
+      return;
+    }
+  } catch(e) {}
+
+  // Fetch from MLB Stats API
+  setStatus('loading', 'Fetching from MLB Stats API…');
+  try {
+    const [games, standings] = await Promise.all([
+      fetchMLBGames(),
+      fetchMLBStandings()
+    ]);
+    if (games.length > 0) {
+      API_GAMES = games;
+      await window.storage.set(cacheKey, JSON.stringify(API_GAMES));
+    }
+    if (standings.length > 0) {
+      STANDINGS = standings;
+      await window.storage.set(standingsKey, JSON.stringify(STANDINGS));
+    }
+    setStatus('ok', `✓ ${API_GAMES.length} games · ${STANDINGS.length} teams · live from MLB`);
+  } catch(e) {
+    console.error('MLB API fetch failed:', e);
+    setStatus('error', `MLB API unavailable — ${e.message}`);
+    // Try to use any previously cached data (even yesterday's)
+    try {
+      const keys = await window.storage.list('mlb-games-v2-');
+      if (keys && keys.keys && keys.keys.length > 0) {
+        const latest = keys.keys.sort().reverse()[0];
+        const cached = await window.storage.get(latest);
+        if (cached) {
+          API_GAMES = JSON.parse(cached.value);
+          setStatus('error', `MLB API error — showing last cached data (${latest.replace('mlb-games-v2-','')})`);
+        }
+      }
+    } catch(e2) {}
+    // If STANDINGS is still empty, build from game results
+    if (STANDINGS.length === 0) buildStandingsFromGames();
+  }
+}
+
+// Derive basic standings from game results if API fails
+function buildStandingsFromGames() {
+  const records = {};
+  API_GAMES.forEach(g => {
+    [g.home, g.away].forEach(a => {
+      if (!records[a]) records[a] = {wins:0, losses:0};
+    });
+    if (g.homeScore > g.awayScore) { records[g.home].wins++; records[g.away].losses++; }
+    else { records[g.away].wins++; records[g.home].losses++; }
+  });
+  STANDINGS = Object.entries(records).map(([abbr, r]) => ({
+    abbr, name: TEAM_NAMES[abbr] || abbr,
+    wins: r.wins, losses: r.losses,
+    conf: TEAM_CONF[abbr] || 'AL'
+  }));
+}
+
+// ── Force refresh (clears today's cache) ─────────────────────────────────────
+async function refreshData() {
+  const today = todayStr();
+  try {
+    await window.storage.delete('mlb-games-v2-' + today);
+    await window.storage.delete('mlb-standings-v2-' + today);
   } catch(e) {}
   await loadOrFetchGames();
   TEAM_STATS = buildTeamStats();
